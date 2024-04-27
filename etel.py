@@ -57,17 +57,19 @@ def comp_dFd𝜙(𝜆, G, w, GTw, GTdiagw, dGd𝜙):
 
     M = torch.eye(𝜆.shape[-1]).unsqueeze(0) - torch.bmm(GTw, 𝜆.unsqueeze(-2))
 
-    dFd𝜙 = torch.bmm(M, (dGd𝜙 * w.unsqueeze(-1).unsqueeze(-1)).sum(axis=1))
-    dFd𝜙 = dFd𝜙 + torch.bmm(GTdiagw, (dGd𝜙 * 𝜆.unsqueeze(-2).unsqueeze(-1)).sum(axis=-2))
+    dFd𝜙 = {}
+    for (p, dGdp) in dGd𝜙.items():
+        dFdp = torch.bmm(M, (dGdp.flatten(3) * w.unsqueeze(-1).unsqueeze(-1)).sum(axis=1))
+        dFd𝜙[p] = dFdp + torch.bmm(GTdiagw, (dGdp.flatten(3) * 𝜆.unsqueeze(-2).unsqueeze(-1)).sum(axis=-2))
 
     return dFd𝜙
 
 def grad_log_pX𝜃(g, X, 𝜃, eps=1e-4):
 
-    N,T = X.shape[:2] # X.shape is N x T x D
-    G = g(X, 𝜃)
-    𝜆 = solve_𝜆(G)
-    w = torch.exp(log_w_opt(𝜆, G))
+    N,T = X.shape[:2]                               # N x T x D
+    G = g(X, 𝜃)                                     # N x T x K
+    𝜆 = solve_𝜆(G)                                  # N     x K  
+    w = torch.exp(log_w_opt(𝜆, G))                  # N x T
 
     GTw = torch.bmm(w.unsqueeze(-2), G).transpose(-1,-2)
     idx_n_good = torch.abs(GTw.squeeze(-1)).mean(axis=-1) < eps
@@ -76,18 +78,23 @@ def grad_log_pX𝜃(g, X, 𝜃, eps=1e-4):
         X, 𝜃, G, 𝜆, w, GTw = X[idx_n_good], 𝜃[idx_n_good], G[idx_n_good], 𝜆[idx_n_good], w[idx_n_good], GTw[idx_n_good]
 
     GTdiagw = (G  * w.unsqueeze(-1)).transpose(-1,-2)
-    dGd𝜙=g.jacobian_pars(X, 𝜃)
+    dGd𝜙=g.jacobian_pars(X, 𝜃)                      # struct of { par : N x T x K x dim(par) }
 
     # inverse function theorem 
-    dFd𝜆 = comp_dFd𝜆(𝜆, G, GTdiagw)
-    dFd𝜙 = comp_dFd𝜙(𝜆, G, w, GTw, GTdiagw, dGd𝜙)
-    d𝜆d𝜙 = - torch.linalg.solve(dFd𝜆, dFd𝜙) # Inverse function theorem: d𝜆d𝜙 = inv(dFd𝜆) * dFd𝜙 
+    dFd𝜆 = comp_dFd𝜆(𝜆, G, GTdiagw)                 # N     x K x K
+    dFd𝜙 = comp_dFd𝜙(𝜆, G, w, GTw, GTdiagw, dGd𝜙)  # struct of { par : N x K x dim(par) }
+    d𝜆d𝜙 = {}                                       # struct of { par : N x K x dim(par) }
+    for (p, dFdp) in dFd𝜙.items():
+        d𝜆d𝜙[p] = - torch.linalg.solve(dFd𝜆, dFdp) # Inverse function theorem: d𝜆d𝜙 = inv(dFd𝜆) * dFd𝜙 
 
-    # differentiating w* and g_𝜙(X,𝜃) wrt 𝜙
-    diff  = (1. - T * w).unsqueeze(-1)
-    grad = torch.zeros((N, dFd𝜙.shape[-1]))
-    grad[idx_n_good] = torch.bmm((diff * G).sum(axis=-2).unsqueeze(-2), d𝜆d𝜙).squeeze(-2)
-    grad[idx_n_good] = grad[idx_n_good] + torch.bmm(𝜆.unsqueeze(-2), (diff.unsqueeze(-1) * dGd𝜙).sum(axis=-3)).squeeze(-2)
+    # differentiating w* and g_𝜙(X,𝜃) wrt 𝜙        
+    diff  = (1. - T * w).unsqueeze(-1)              # N x T x 1
+    grad = {}                                       # struct of { par : N x T x dim(par) }
+    for (p, dGdp) in dGd𝜙.items():
+        grad[p] = torch.zeros((N, np.prod(dGdp.shape[3:]))) # N x dim(par)
+        grad[p][idx_n_good] = torch.bmm(𝜆.unsqueeze(-2), (diff.unsqueeze(-1) * dGdp.flatten(3)).sum(axis=1)).squeeze(-2)
+    for (p, d𝜆dp) in d𝜆d𝜙.items():
+        grad[p][idx_n_good] = grad[p][idx_n_good] + torch.bmm((diff * G).sum(axis=-2).unsqueeze(-2), d𝜆dp).squeeze(-2)
 
     return grad
 
