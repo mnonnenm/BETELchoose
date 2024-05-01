@@ -6,6 +6,10 @@ from scipy.special import logsumexp
 dtype = torch.float64
 dtype_np = np.float64
 
+def log_w_opt(𝜆, G):
+    𝜂 = torch.bmm(G, 𝜆.unsqueeze(-1)).squeeze(-1)
+    return 𝜂 - torch.logsumexp(𝜂,axis=-1).unsqueeze(-1)
+
 def Φ(𝜆, G):
     𝜂 = torch.matmul(G, 𝜆.unsqueeze(-1)).squeeze(-1)
     return torch.logsumexp(𝜂, axis=-1)
@@ -28,10 +32,6 @@ def solve_𝜆(G):
                 return Φ_np(𝜆, G[i].numpy())
             𝜆[i] = spo.minimize(Φ_G, 𝜆0[i])['x']
     return torch.tensor(𝜆,dtype=dtype)
-
-def log_w_opt(𝜆, G):
-    𝜂 = torch.bmm(G, 𝜆.unsqueeze(-1)).squeeze(-1)
-    return 𝜂 - torch.logsumexp(𝜂,axis=-1).unsqueeze(-1)
 
 def log_pX𝜃(g, X, 𝜃, eps=1e-4):
     G = g(X, 𝜃)
