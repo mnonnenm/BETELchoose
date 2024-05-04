@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
+from scipy.special import loggamma
 
 def plot_res(g, simulator, log_pX𝜃, dtype, setup, dist, Ts=[10,100,1000], N=50, 𝜇=0.5, 𝜎=1.0, print_modes=False):
     if setup == '1D':
